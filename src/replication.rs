@@ -1,10 +1,11 @@
 use core::pin::Pin;
 use std::fmt;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::{
     task::Poll,
     time::{SystemTime, UNIX_EPOCH},
 };
+use alloc::vec::IntoIter;
 
 use bytes::Bytes;
 use bytes::{BufMut, BytesMut};
@@ -13,7 +14,7 @@ use futures::{
     ready, Sink, StreamExt,
 };
 use futures::future::err;
-use prost::Message;
+use prost::{alloc, Message};
 use tokio::sync::{broadcast, oneshot};
 use tokio_postgres::{Client, CopyBothDuplex, Error, NoTls, SimpleQueryMessage, SimpleQueryRow};
 use tracing::{debug, trace, Instrument};
@@ -49,36 +50,21 @@ impl fmt::Display for XLogDataByteId {
     }
 }
 
-#[derive(Debug)]
-pub struct LogicalReplicationModeOptions {
-    plugin: String,
-}
-
-#[repr(u32)]
-pub enum ReplicationMode {
-    LogicalReplication(LogicalReplicationModeOptions) = 0,
-    PhysicalReplication = 1,
-}
-
-impl fmt::Display for ReplicationMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::LogicalReplication(plugin) => format!(r#"LOGICAL "{:?}""#, plugin),
-                Self::PhysicalReplication => "PHYSICAL".into(),
-            }
-        )
-    }
-}
 
 // LSN is a PostgreSQL Log Sequence Number. See https://www.postgresql.org/docs/current/datatype-pg-lsn.html.
 pub struct LSN(u64);
 
 #[derive(Debug)]
-pub enum LSNError<'a> {
-    ParseError(&'a String),
+pub enum LSNError {
+    ParseError(String),
+}
+
+impl Display for LSNError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            ParseError(err) => err,
+        })
+    }
 }
 
 macro_rules! scan {
@@ -89,7 +75,13 @@ macro_rules! scan {
 }
 
 impl LSN {
-    pub fn parse_lsn(text_lsn: &String) -> Result<LSN, LSNError> {
+    pub fn to_postgres_string(&self) -> String {
+        let left = self.0 >> 32;
+        let right = self.0 as u64;
+        format!("{}/{}", left, right)
+    }
+
+    pub fn parse_lsn(text_lsn: String) -> Result<LSN, LSNError> {
         let (left, right) = scan!(text_lsn, "/", u64, u64);
 
         let left = match left {
@@ -106,39 +98,178 @@ impl LSN {
         let lsn = LSN(lsn);
         Ok(lsn)
     }
-
-    pub fn decode_text(text_lsn: &String) -> Option<LSN> {
-        let lsn = Self::parse_lsn(text_lsn);
-        match lsn {
-            Ok(lsn) => Some(lsn),
-            Err(_) => None,
-        }
-    }
-
-    pub fn decode_bytes(text_lsn: Vec<u8>) -> Option<LSN> {
-        todo!()
-    }
 }
 
 // String formats the LSN value into the XXX/XXX format which is the text format used by PostgreSQL.
 impl Debug for LSN {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let left = self.0 >> 32;
-        let right = self.0 as u32;
-        let text = format!("{}/{}", left, right);
-        return f.write_str(&text);
+        return f.write_str(&self.to_postgres_string());
     }
 }
+impl Display for LSN {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        return f.write_str(&self.to_postgres_string());
+    }
+}
+
+#[derive(Debug)]
+pub struct LogicalReplicationModeOptions {
+    plugin: String,
+}
+
+#[repr(u32)]
+#[derive(Debug)]
+pub enum ReplicationMode {
+    LogicalReplication(LogicalReplicationModeOptions) = 0,
+    PhysicalReplication = 1,
+}
+
+impl ReplicationMode {
+    pub fn to_create_replication_slot_part(&self) -> String {
+        format!("{}", match self {
+                Self::LogicalReplication(plugin) => format!(r#"LOGICAL "{:?}""#, plugin),
+                Self::PhysicalReplication => "PHYSICAL".into(),
+            }
+        )
+    }
+    pub fn to_start_replication_part(&self) -> String {
+        format!("{}", match self {
+                Self::LogicalReplication(_) => "",
+                Self::PhysicalReplication => "PHYSICAL".into(),
+            }
+        )
+    }
+}
+
+impl fmt::Display for ReplicationMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_create_replication_slot_part())
+    }
+}
+
+#[derive(Debug)]
+pub struct CreateReplicationSlotOptions {
+    slot_name: String,
+    temporary: bool,
+    snapshot_action: String,
+    mode: ReplicationMode,
+}
+
+impl CreateReplicationSlotOptions {
+    pub fn build_query(&self) -> String {
+        let temp = if self.temporary {"TEMPORARY"} else {""};
+
+        format!(
+            r#"CREATE_REPLICATION_SLOT {} {} {} {}"#,
+            self.slot_name, temp, self.mode.to_create_replication_slot_part(), self.snapshot_action
+        )
+    }
+}
+
+// CreateReplicationSlotResult is the parsed results the CREATE_REPLICATION_SLOT command.
+#[derive(Debug)]
+pub struct CreateReplicationSlotResult {
+    slot_name: String,
+    consistent_point: LSN,
+    snapshot_name: Option<String>,
+    output_plugin: Option<String>,
+}
+
+fn simple_query_message_to_simple_query_row(res: &mut IntoIter<SimpleQueryMessage>) -> Result<SimpleQueryRow, PostgresStreamingError> {
+     let out = loop {
+        match res.next() {
+            Some(SimpleQueryMessage::Row(msg)) => break msg,
+            Some(SimpleQueryMessage::CommandComplete(num)) => continue,
+            _ => return Err(PostgresStreamingError::CreateReplicationResultParsingError("received message from postgres is not a row".into())),
+        }
+    };
+    Ok(out)
+}
+
+impl CreateReplicationSlotResult {
+    pub fn parse_query_row(res: &mut IntoIter<SimpleQueryMessage>) -> Result<Self, PostgresStreamingError> {
+        let row = simple_query_message_to_simple_query_row(res)?;
+
+        Ok(Self {
+            slot_name: match row.get("slot_name") {
+                Some(m) => m.to_owned(),
+                _ => return Err(PostgresStreamingError::CreateReplicationResultParsingError("slot_name not found in result from postgres".into())),
+            },
+            consistent_point: match row.get("consistent_point") {
+                Some(m) => LSN::parse_lsn(m.to_owned())?,
+                _ => return Err(PostgresStreamingError::CreateReplicationResultParsingError("consistent_point not found in result from postgres".into())),
+            },
+            snapshot_name: row.get("snapshot_name").and_then(|m| Some(m.to_owned())),
+            output_plugin: row.get("output_plugin").and_then(|m| Some(m.to_owned())),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct StartReplicationOptions  {
+    slot_name: String,
+    mode: ReplicationMode,
+    start_lsn: LSN,
+    plugin_args: Vec<String>,
+}
+
+impl StartReplicationOptions {
+    pub fn build_query(&self) -> String {
+        format!(
+            r#"START_REPLICATION SLOT {} {} {}"#,
+            self.slot_name, self.mode.to_start_replication_part(), self.start_lsn
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct StartReplicationResult {
+
+}
+
+impl fmt::Display for StartReplicationResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", "")
+    }
+}
+
+impl StartReplicationResult {
+    pub fn parse_query_row(res: &mut alloc::vec::IntoIter<SimpleQueryMessage>) -> Result<Self, PostgresStreamingError> {
+        let row = simple_query_message_to_simple_query_row(res)?;
+
+        for r in row.columns() {
+            let name = r.name();
+            let val = match row.get(name) {
+                Some(r) => r,
+                None => "null",
+            };
+
+            println!("{}: {}", name, val);
+        }
+
+        Ok(Self {
+
+        })
+    }
+}
+
 
 pub enum PostgresStreamingError {
     TokioPostgres(tokio_postgres::Error),
     QueryWrongResult(String, Vec<SimpleQueryMessage>),
     CreateReplicationResultParsingError(String),
+    LSNError(LSNError),
 }
 
 impl From<tokio_postgres::Error> for PostgresStreamingError {
     fn from(value: Error) -> Self {
         Self::TokioPostgres(value)
+    }
+}
+
+impl From<LSNError> for PostgresStreamingError {
+    fn from(value: LSNError) -> Self {
+        Self::LSNError(value)
     }
 }
 
@@ -173,6 +304,9 @@ impl fmt::Debug for PostgresStreamingError {
             },
             PostgresStreamingError::CreateReplicationResultParsingError(error) => {
                 writeln!(fmt, "{}", error)?;
+            },
+            PostgresStreamingError::LSNError(error) => {
+                writeln!(fmt, "{}", error)?;
             }
         };
 
@@ -180,62 +314,28 @@ impl fmt::Debug for PostgresStreamingError {
     }
 }
 
-pub struct CreateReplicationSlotOptions {
-    temporary: bool,
-    snapshot_action: String,
-    mode: ReplicationMode,
-}
-
-// CreateReplicationSlotResult is the parsed results the CREATE_REPLICATION_SLOT command.
-pub struct CreateReplicationSlotResult {
-    slot_name: String,
-    consistent_point: String,
-    snapshot_name: Option<String>,
-    output_plugin: Option<String>,
-}
-
-impl CreateReplicationSlotResult {
-    pub fn parse_query_row(out: SimpleQueryRow) -> Result<Self, PostgresStreamingError> {
-        Ok(Self {
-            slot_name: match out.get("slot_name") {
-                Some(out) => out.to_owned(),
-                _ => return Err(PostgresStreamingError::CreateReplicationResultParsingError("slot_name not found in result from postgres".into())),
-            },
-            consistent_point: match out.get("consistent_point") {
-                Some(out) => out.to_owned(),
-                _ => return Err(PostgresStreamingError::CreateReplicationResultParsingError("consistent_point not found in result from postgres".into())),
-            },
-            snapshot_name: out.get("snapshot_name").and_then(|row| Some(row.to_owned())),
-            output_plugin: out.get("output_plugin").and_then(|row| Some(row.to_owned())),
-        })
-    }
-}
 
 // create_replication_slot creates a logical replication slot.
 pub async fn create_replication_slot(
     client: &Client,
-    slot_name: &String,
-    options: CreateReplicationSlotOptions
+    options: &CreateReplicationSlotOptions
 ) -> Result<CreateReplicationSlotResult, PostgresStreamingError> {
-    let temp = if options.temporary {"TEMPORARY"} else {""};
-
-    let query = format!(
-        r#"CREATE_REPLICATION_SLOT {} {} {} {}"#,
-        slot_name, temp, options.mode.to_string(), options.snapshot_action
-    );
-
+    let query = options.build_query();
     let mut res = client.simple_query(&query).await?.into_iter();
-    let row = loop {
-        match res.next() {
-            Some(SimpleQueryMessage::Row(msg)) => break msg,
-            Some(SimpleQueryMessage::CommandComplete(num)) => continue,
-            _ => return Err(PostgresStreamingError::CreateReplicationResultParsingError("received message from postgres is not a row".into())),
-        }
-    };
 
-    Ok(CreateReplicationSlotResult::parse_query_row(row)?)
+    CreateReplicationSlotResult::parse_query_row(&mut res)
 }
 
+// StartReplication begins the replication process by executing the START_REPLICATION command.
+pub async fn start_replication(
+    client: &Client,
+    options: &StartReplicationOptions
+) -> Result<StartReplicationResult, PostgresStreamingError> {
+    let query = options.build_query();
+    let mut res = client.simple_query(&query).await?.into_iter();
+
+    StartReplicationResult::parse_query_row(&mut res)
+}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -245,10 +345,7 @@ pub struct Transaction {
     pub events: Vec<RowMessage>,
 }
 
-async fn keep_alive_response(
-    duplex_stream: &mut Pin<Box<CopyBothDuplex<Bytes>>>,
-) -> Result<(), PostgresStreamingError> {
-    //unimplemented!();
+async fn keep_alive_response(duplex_stream: &mut Pin<Box<CopyBothDuplex<Bytes>>>) -> Result<(), PostgresStreamingError> {
     // not sure if sending the client system's "time since 2000-01-01" is actually necessary, but lets do as postgres asks just in case
     const SECONDS_FROM_UNIX_EPOCH_TO_2000: u128 = 946684800;
     let time_since_2000: u64 = (SystemTime::now()
@@ -331,51 +428,57 @@ pub async fn start_streaming_changes(db_config: String) -> Result<(), PostgresSt
             .to_string();
 
     let options = CreateReplicationSlotOptions {
+        slot_name: slot_name,
         temporary: true,
         mode: ReplicationMode::PhysicalReplication,
         snapshot_action: "".into(),
     };
 
-    let repl_res = create_replication_slot(
-        &client,
-        &slot_name,
-        options,
-    ).await?;
+    let create_slot_res = create_replication_slot(&client, &options).await?;
 
-    let query = format!(r#"START_REPLICATION SLOT {} LOGICAL {}"#, slot_name, repl_res.consistent_point);
+    let options = StartReplicationOptions {
+        slot_name: create_slot_res.slot_name,
+        mode: options.mode,
+        start_lsn: create_slot_res.consistent_point,
+        plugin_args: vec!(),
+    };
+    let res = start_replication(&client, &options).await?;
+
+    println!("{}", res);
+    unimplemented!()
     //let query = format!("START_REPLICATION SLOT {} PHYSICAL {}", slot_name, lsn);
-    let mut duplex_stream = Box::pin(client.copy_both_simple::<bytes::Bytes>(&query).await?);
-
-    while let Some(event) = duplex_stream.as_mut().next().await {
-        let event = event?;
-
-        // see here for list of message-types: https://www.postgresql.org/docs/10/protocol-replication.html
-        // type: XLogData (WAL data, ie. change of data in db)
-        trace!("event: {:#02x}", event);
-
-        match event[0] {
-            b'k' => {
-                let last_byte = event.last().unwrap();
-                let timeout_imminent = last_byte == &1;
-                debug!("keep-alive timeout: {}", timeout_imminent);
-                trace!("receive message:{:#02x}", event);
-
-                // if timeout = true, then send keep-alive message to postgres server
-                if timeout_imminent {
-                    keep_alive_response(&mut duplex_stream).await?;
-                }
-            }
-            b'w' => {
-                let deb = String::from_utf8_lossy(&event[25..]);
-                println!("{:#?}", deb);
-            }
-            x => {
-                println!("event type {:#02x} not implemented", x);
-            }
-        }
-    }
-
-    Ok(())
+    // let mut duplex_stream = Box::pin(client.copy_both_simple::<bytes::Bytes>(&query).await?);
+    //
+    // while let Some(event) = duplex_stream.as_mut().next().await {
+    //     let event = event?;
+    //
+    //     // see here for list of message-types: https://www.postgresql.org/docs/10/protocol-replication.html
+    //     // type: XLogData (WAL data, ie. change of data in db)
+    //     trace!("event: {:#02x}", event);
+    //
+    //     match event[0] {
+    //         b'k' => {
+    //             let last_byte = event.last().unwrap();
+    //             let timeout_imminent = last_byte == &1;
+    //             debug!("keep-alive timeout: {}", timeout_imminent);
+    //             trace!("receive message:{:#02x}", event);
+    //
+    //             // if timeout = true, then send keep-alive message to postgres server
+    //             if timeout_imminent {
+    //                 keep_alive_response(&mut duplex_stream).await?;
+    //             }
+    //         }
+    //         b'w' => {
+    //             let deb = String::from_utf8_lossy(&event[25..]);
+    //             println!("{:#?}", deb);
+    //         }
+    //         x => {
+    //             println!("event type {:#02x} not implemented", x);
+    //         }
+    //     }
+    // }
+    //
+    // Ok(())
 }
 
 pub async fn clickhouse_worker(mut rx: broadcast::Receiver<Transaction>) {
