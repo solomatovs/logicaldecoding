@@ -1,14 +1,17 @@
 services:
   postgres:
-    image: postgres:14.5
+    container_name: postgres-logical
+    # image: postgres:14
+    # image: ubuntu:22.04
     build:
       context: ./
       dockerfile: ./Dockerfile
     ports:
-      - "5432:5432"
+      - 5432:5432
     environment:
       - POSTGRES_PASSWORD=password
     command:
       - "postgres"
       - "-c"
       - "wal_level=logical"
+    # command: /bin/sleep 600000

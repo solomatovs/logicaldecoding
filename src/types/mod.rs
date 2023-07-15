@@ -194,7 +194,7 @@ mod test {
 
         let tx_clone = tx.clone();
         let listener_handle = task::spawn(async move {
-            crate::replication::start_streaming_changes(current_database, ready_tx, tx_clone).await
+            crate::replication::postgres_worker(current_database, ready_tx, tx_clone).await
         });
 
         // block waiting for replication
