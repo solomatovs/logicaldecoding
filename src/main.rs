@@ -12,46 +12,42 @@ use tracing::error;
 use tracing_subscriber::EnvFilter;
 use crate::replication::PostgresStreamingError;
 
-
-#[tokio::main]
-async fn main_back() -> Result<()> {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "logicaldecoding=info")
-    }
-    tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
-    let m = Migrator::new(std::path::Path::new("./migrations")).await?;
-    let pool = PgPool::connect(&env::var("DATABASE_URL")?).await?;
-    m.run(&pool).await?;
-
-    let (replica_tx, replica_rx) = tokio::sync::oneshot::channel::<()>();
-    let (ransaction_tx, transaction_rx) = tokio::sync::broadcast::channel::<Transaction>(100);
-
-    let streaming_handle = task::spawn(async {
-      replication::postgres_worker("postgres", replica_tx, ransaction_tx).await
-    });
-
-    let clickhouse_handle = task::spawn(async {
-      replication::clickhouse_worker(transaction_rx).await
-    });
-
-    // block waiting for replication
-    replica_rx.await.unwrap();
-
-    streaming_handle.await.unwrap().unwrap();
-    clickhouse_handle.await.unwrap();
-
-    Ok(())
-}
+//
+// #[tokio::main]
+// async fn main_back() -> Result<()> {
+//     if std::env::var("RUST_LOG").is_err() {
+//         std::env::set_var("RUST_LOG", "logicaldecoding=info")
+//     }
+//     tracing_subscriber::fmt::fmt()
+//         .with_env_filter(EnvFilter::from_default_env())
+//         .init();
+//
+//     let m = Migrator::new(std::path::Path::new("./migrations")).await?;
+//     let pool = PgPool::connect(&env::var("DATABASE_URL")?).await?;
+//     m.run(&pool).await?;
+//
+//     let (replica_tx, replica_rx) = tokio::sync::oneshot::channel::<()>();
+//     let (ransaction_tx, transaction_rx) = tokio::sync::broadcast::channel::<Transaction>(100);
+//
+//     let streaming_handle = task::spawn(async {
+//       replication::postgres_worker("postgres", replica_tx, ransaction_tx).await
+//     });
+//
+//     let clickhouse_handle = task::spawn(async {
+//       replication::clickhouse_worker(transaction_rx).await
+//     });
+//
+//     // block waiting for replication
+//     replica_rx.await.unwrap();
+//
+//     streaming_handle.await.unwrap().unwrap();
+//     clickhouse_handle.await.unwrap();
+//
+//     Ok(())
+// }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // if std::env::var("RUST_LOG").is_err() {
-    //     std::env::set_var("RUST_LOG", "logicaldecoding=info")
-    // }
-
     tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
