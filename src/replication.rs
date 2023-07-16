@@ -82,16 +82,22 @@ impl LSN {
     }
 
     pub fn parse_lsn(text_lsn: String) -> Result<LSN, LSNError> {
-        let (left, right) = scan!(text_lsn, "/", u64, u64);
+        let mut parts = text_lsn.split('/');
 
-        let left = match left {
+        let left = match parts.next() {
             None => return Err(ParseError(text_lsn)),
-            Some(left) => left,
+            Some(val) => match u64::from_str_radix(val, 16) {
+                Ok(val) => val,
+                Err(err) => return Err(ParseError(err.to_string())),
+            },
         };
 
-        let right = match right {
+        let right = match parts.next() {
             None => return Err(ParseError(text_lsn)),
-            Some(right) => right,
+            Some(val) => match u64::from_str_radix(val, 16) {
+                Ok(val) => val,
+                Err(err) => return Err(ParseError(err.to_string())),
+            },
         };
 
         let lsn: u64 = (left << 32) + right;
@@ -127,7 +133,7 @@ pub enum ReplicationMode {
 impl ReplicationMode {
     pub fn to_create_replication_slot_part(&self) -> String {
         format!("{}", match self {
-                Self::LogicalReplication(plugin) => format!(r#"LOGICAL "{:?}""#, plugin),
+                Self::LogicalReplication(plugin) => format!(r#"LOGICAL "{}""#, plugin.plugin),
                 Self::PhysicalReplication => "PHYSICAL".into(),
             }
         )
@@ -430,7 +436,9 @@ pub async fn start_streaming_changes(db_config: String) -> Result<(), PostgresSt
     let options = CreateReplicationSlotOptions {
         slot_name: slot_name,
         temporary: true,
-        mode: ReplicationMode::PhysicalReplication,
+        mode: ReplicationMode::LogicalReplication(LogicalReplicationModeOptions {
+            plugin: "wal2json".into()
+        }),
         snapshot_action: "".into(),
     };
 
