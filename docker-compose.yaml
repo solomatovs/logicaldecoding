@@ -15,3 +15,11 @@ services:
       - "-c"
       - "wal_level=logical"
     # command: /bin/sleep 600000
+
+  clickhouse:
+    container_name: clickhouse
+    image: clickhouse/clickhouse-server:23.3.8.21
+    ports:
+      - 9000:9000
+      - 8123:8123
+      - 9009:9009

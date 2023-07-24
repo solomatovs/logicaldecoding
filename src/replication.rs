@@ -1,5 +1,7 @@
 use core::pin::Pin;
 use std::fmt;
+use bytes::Bytes;
+
 use std::fmt::{Debug, Display, Formatter};
 use std::{
     task::Poll,
@@ -8,26 +10,53 @@ use std::{
 use alloc::vec::IntoIter;
 use std::convert::Into;
 
-use bytes::Bytes;
-use bytes::{BufMut, BytesMut};
 use futures::{
     future::{self},
     ready, Sink, StreamExt,
 };
-use futures::future::err;
-use prost::{alloc, Message};
-use tokio::sync::{broadcast, oneshot};
-use tokio_postgres::{Client, CopyBothDuplex, Error, NoTls, SimpleQueryMessage, SimpleQueryRow};
-use tracing::{debug, trace, Instrument};
+use prost::alloc;
+use tokio::pin;
+use tokio_postgres::{Client, Error, NoTls, SimpleQueryMessage, SimpleQueryRow, CopyBothDuplex};
+use tokio_postgres::replication::LogicalReplicationStream;
+use postgres_protocol::message::backend::ReplicationMessage;
 
-use decoderbufs::{Op, RowMessage};
+use tracing::{debug, trace};
 
 use crate::replication::LSNError::ParseError;
 
-pub mod decoderbufs {
-    include!(concat!(env!("OUT_DIR"), "/decoderbufs.rs"));
+
+
+unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+    ::core::slice::from_raw_parts(
+        (p as *const T) as *const u8,
+        ::core::mem::size_of::<T>(),
+    )
 }
 
+unsafe fn u8_slice_as_any<T>(p: &[u8]) -> &T {
+    let len = p.len();
+    let size = ::core::mem::size_of::<T>();
+
+    &*(p.as_ptr() as *const T)
+}
+
+macro_rules! print_offsets {
+    ( $root:ty ; $($member:ident),* ) => {
+        let x: $root = unsafe { std::mem::zeroed() };
+        let pstart: *const u8 = (&x) as *const _ as *const u8;
+        $(
+        let offset:usize = {
+            let pmember: *const u8 = (&x.$member) as *const _ as *const u8;
+            (pmember as usize) - (pstart as usize)
+        };
+        println!("{:4}  {}", offset, stringify!($member));
+        )*
+    }
+}
+
+// fn main(){
+//     print_offsets!(IdentifyControllerResponse; vid, cntrltype, nvmsr, sqes, sgls, subnqn, ioccsz, psd, vs);
+// }
 static MICROSECONDS_FROM_UNIX_EPOCH_TO_2000: u128 = 946_684_800_000_000;
 
 #[repr(u8)]
@@ -53,6 +82,7 @@ impl fmt::Display for XLogDataByteId {
 
 
 // LSN is a PostgreSQL Log Sequence Number. See https://www.postgresql.org/docs/current/datatype-pg-lsn.html.
+#[repr(C)]
 pub struct LSN(u64);
 
 #[derive(Debug)]
@@ -184,59 +214,31 @@ pub trait LogicalReplicationModeOptions {
 // }
 
 #[derive(Debug)]
-pub struct Wal2JsonReplicationModeOptions {
-    plugin_args: Option<Vec<String>>,
+pub struct CustomReplicationModeOptions {
+    plugin_name: String,
+    plugin_args: Option<String>,
 }
-impl Wal2JsonReplicationModeOptions {
-    pub fn default() -> Self {
+impl CustomReplicationModeOptions {
+    fn new(plugin_name: String, plugin_args: Option<String>) -> Self {
         Self {
-            plugin_args:
-            Some(vec![
-                r#"'format-version', 1"#.to_string()
-            ])
+            plugin_name,
+            plugin_args
         }
     }
 }
-
-impl LogicalReplicationModeOptions for Wal2JsonReplicationModeOptions {
+impl LogicalReplicationModeOptions for CustomReplicationModeOptions {
     fn plugin_name(&self) -> String {
-        "wal2json".into()
+        self.plugin_name.clone()
     }
     fn plugin_args(&self) -> String {
         if let Some(var) = &self.plugin_args {
-            format!("({})", var.join(", "))
+            format!(" ({})", var)
         } else {
             "".into()
         }
     }
 }
 
-
-#[derive(Debug)]
-pub struct DecoderbufsReplicationModeOptions {
-    plugin_args: Option<Vec<String>>,
-}
-
-impl DecoderbufsReplicationModeOptions {
-    pub fn default() -> Self {
-        Self {
-            plugin_args: None
-        }
-    }
-}
-
-impl LogicalReplicationModeOptions for DecoderbufsReplicationModeOptions {
-    fn plugin_name(&self) -> String {
-        "decoderbufs".into()
-    }
-    fn plugin_args(&self) -> String {
-        if let Some(var) = &self.plugin_args {
-            format!("({})", var.join(", "))
-        } else {
-            "".into()
-        }
-    }
-}
 
 #[repr(u32)]
 #[derive(Debug)]
@@ -352,7 +354,6 @@ pub struct StartReplicationOptions<T>
     slot_name: String,
     mode: ReplicationMode<T>,
     start_lsn: LSN,
-    plugin_args: Vec<String>,
 }
 
 impl<T> StartReplicationOptions<T>
@@ -360,8 +361,8 @@ impl<T> StartReplicationOptions<T>
 {
     pub fn build_query(&self) -> String {
         format!(
-            r#"START_REPLICATION SLOT {} {} {}"#,
-            self.slot_name, self.mode.to_start_replication_part(), self.start_lsn
+            r#"START_REPLICATION SLOT {} {} {}{}"#,
+            self.slot_name, self.mode.to_start_replication_part(), self.start_lsn, self.mode.to_plugin_options()
         )
     }
 }
@@ -459,6 +460,40 @@ impl fmt::Debug for PostgresStreamingError {
 }
 
 
+#[repr(C, packed)]
+pub struct PrimaryKeepaliveMessage {
+    wal_pos: LSN,
+    server_time: u64,
+    reply_requested: bool,
+}
+
+impl PrimaryKeepaliveMessage {
+    pub fn parse(buf: &Bytes) -> &Self {
+        let res = unsafe {
+            u8_slice_as_any::<Self>(buf)
+        };
+
+        res
+    }
+}
+
+#[repr(C, packed)]
+pub struct XLogData {
+    wal_start: LSN,
+    server_wal_end: LSN,
+    server_time: u64
+}
+
+impl XLogData {
+    pub fn parse(buf: &Bytes) -> &Self{
+        let res = unsafe {
+            u8_slice_as_any::<Self>(buf)
+        };
+
+        res
+    }
+}
+
 // create_replication_slot creates a logical replication slot.
 pub async fn create_replication_slot<T>(
     client: &Client,
@@ -476,22 +511,16 @@ pub async fn create_replication_slot<T>(
 pub async fn start_replication<T>(
     client: &Client,
     options: &StartReplicationOptions<T>
-) -> Result<StartReplicationResult, PostgresStreamingError>
+) -> Result<CopyBothDuplex<Bytes>, PostgresStreamingError>
     where T : LogicalReplicationModeOptions
 {
     let query = options.build_query();
-    let mut res = client.simple_query(&query).await?.into_iter();
+    let duplex_stream = client.copy_both_simple::<bytes::Bytes>(&query).await?;
+    // let duplex_stream = Box::pin(duplex_stream);
 
-    StartReplicationResult::parse_query_row(&mut res)
+    Ok(duplex_stream)
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct Transaction {
-    pub xid: u32,
-    pub commit_time: u64,
-    pub events: Vec<RowMessage>,
-}
 
 async fn keep_alive_response(duplex_stream: &mut Pin<Box<CopyBothDuplex<Bytes>>>) -> Result<(), PostgresStreamingError> {
     // not sure if sending the client system's "time since 2000-01-01" is actually necessary, but lets do as postgres asks just in case
@@ -549,6 +578,7 @@ async fn keep_alive_response(duplex_stream: &mut Pin<Box<CopyBothDuplex<Bytes>>>
 
     Ok(())
 }
+
 // connect to the database
 /**
  * There appear to be three ways to use replication slots:
@@ -575,10 +605,20 @@ pub async fn start_streaming_changes(db_config: String) -> Result<(), PostgresSt
             .as_millis()
             .to_string();
 
+    let plugin = CustomReplicationModeOptions::new(
+        "wal2json".into(),
+        Some(r#""format-version" '2', "actions" 'insert,update,delete,truncate'"#.into()),
+    );
+
+    // let plugin = CustomReplicationModeOptions::new(
+    //     "decoderbufs".into(),
+    //     None,
+    // );
+
     let options = CreateReplicationSlotOptions {
         slot_name,
         temporary: true,
-        mode: ReplicationMode::LogicalReplication(DecoderbufsReplicationModeOptions::default()),
+        mode: ReplicationMode::LogicalReplication(plugin),
         snapshot_action: "".into(),
     };
 
@@ -588,52 +628,31 @@ pub async fn start_streaming_changes(db_config: String) -> Result<(), PostgresSt
         slot_name: create_slot_res.slot_name,
         mode: options.mode,
         start_lsn: create_slot_res.consistent_point,
-        plugin_args: vec!(),
     };
-    let res = start_replication(&client, &options).await?;
+    let query = options.build_query();
+    let stream = client.copy_both_simple::<bytes::Bytes>(&query).await?;
 
-    println!("{}", res);
-    unimplemented!()
-    //let query = format!("START_REPLICATION SLOT {} PHYSICAL {}", slot_name, lsn);
-    // let mut duplex_stream = Box::pin(client.copy_both_simple::<bytes::Bytes>(&query).await?);
-    //
+    // let stream = start_replication(&client, &options).await?;
+    // let mut stream = replication::ReplicationStream::new(stream);
+    let mut stream = LogicalReplicationStream::new(stream);
+    pin!(stream);
+
+    while let Some(event) = stream.next().await {
     // while let Some(event) = duplex_stream.as_mut().next().await {
-    //     let event = event?;
-    //
-    //     // see here for list of message-types: https://www.postgresql.org/docs/10/protocol-replication.html
-    //     // type: XLogData (WAL data, ie. change of data in db)
-    //     trace!("event: {:#02x}", event);
-    //
-    //     match event[0] {
-    //         b'k' => {
-    //             let last_byte = event.last().unwrap();
-    //             let timeout_imminent = last_byte == &1;
-    //             debug!("keep-alive timeout: {}", timeout_imminent);
-    //             trace!("receive message:{:#02x}", event);
-    //
-    //             // if timeout = true, then send keep-alive message to postgres server
-    //             if timeout_imminent {
-    //                 keep_alive_response(&mut duplex_stream).await?;
-    //             }
-    //         }
-    //         b'w' => {
-    //             let deb = String::from_utf8_lossy(&event[25..]);
-    //             println!("{:#?}", deb);
-    //         }
-    //         x => {
-    //             println!("event type {:#02x} not implemented", x);
-    //         }
-    //     }
-    // }
-    //
-    // Ok(())
-}
+        let event = event?;
 
-pub async fn clickhouse_worker(mut rx: broadcast::Receiver<Transaction>) {
-    loop {
-        match rx.recv().await {
-            Ok(t) => println!("{:?}", t),
-            Err(_) => break,
+        match event {
+            ReplicationMessage::PrimaryKeepAlive(keepalive) => {
+              println!("{:?}", keepalive);
+            },
+            ReplicationMessage::XLogData(data) => {
+              println!("{:?}", data);
+            },
+            _ => {}
         }
     }
+
+    Ok(())
 }
+
+

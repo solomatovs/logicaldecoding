@@ -1,0 +1,24 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+      {
+          "type": "lldb",
+          "request": "launch",
+          "name": "logicaldecoding",
+          "preLaunchTask": "build",
+          "program": "${workspaceFolder}/target/debug/${workspaceRootFolderName}",
+          "env": {
+            "PG_DATABASE_URL": "postgres://postgres:password@localhost:5432/postgres",
+            "PG_PUBLICATION": "publ",
+            "PG_SLOT": "slon",
+            "CH_DATABASE_URL": "tcp://localhost:9001?compression=lz4&ping_timeout=2s&retry_timeout=3s",
+            "RUST_BACKTRACE": "full",
+            "RUST_LOG": "trace",
+          },
+          "cwd": "${workspaceFolder}"
+      },
+  ]
+}
