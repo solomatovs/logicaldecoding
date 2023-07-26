@@ -823,6 +823,7 @@ dependencies = [
  "ctrlc",
  "dotenv",
  "futures 0.3.28",
+ "futures-util",
  "once_cell",
  "pin-project",
  "postgres",

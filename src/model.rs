@@ -5,7 +5,7 @@ use url::Url;
 use std::{fmt, str::FromStr};
 use tokio_postgres::types::{PgLsn, FromSql, ToSql};
 use tokio_postgres::Row;
-
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The Postgres CDC Connector
 #[derive(Parser, Debug, JsonSchema, Clone)]
@@ -21,13 +21,42 @@ pub struct PgConnectorOpt
     pub pg_slot: Option<String>,
     #[clap(long, env = "PG_SLOT_TEMP")]
     pub pg_slot_temp: Option<bool>,
+    #[clap(long, env = "PG_SLOT_PREFIX", default_value = "slot_")]
+    pub pg_slot_prefix: String,
     #[clap(long, env = "PG_CONSISTENT_POINT")]
     pub pg_consistent_point: Option<String>,
+    #[clap(long, env = "PG_SLOT_DELETE_IF_CONFIRMED_LSN_FILE_IS_MISSING", default_value = "false")]
+    pub pg_slot_delete_if_file_slot_missing: bool,
+    #[clap(long, env = "PG_RESYNC_IF_POSTGRES_SLOT_EXISTS_AND_FILE_SLOT_MISSING", default_value = "true")]
+    pub pg_resync_if_postgres_slot_exists_and_file_slot_missing: bool,
     #[clap(long, env = "PG_RESUME_TIMEOUT", default_value = "1000")]
     pub pg_resume_timeout: u64,
 
     #[clap(long)]
     pub pg_skip_setup: bool,
+}
+
+impl PgConnectorOpt {
+  pub fn get_slot_name_from_config_or_generate_if_not_provided(&self) -> String {
+    match &self.pg_slot {
+      Some(slot) => slot.clone(),
+      None => {
+        self.pg_slot_prefix
+        .to_owned() + &SystemTime::now()
+          .duration_since(UNIX_EPOCH)
+          .unwrap()
+          .as_millis()
+          .to_string()
+      }
+    }
+  }
+
+  pub fn temporary_slot_if_needed(&self) ->  String {
+    self.pg_slot_temp
+      .or(Some(false))
+      .map(|x| if x {" TEMPORARY"} else {""})
+      .unwrap().to_string()
+  }
 }
 
 /// The Postgres CDC Connector
@@ -288,7 +317,11 @@ impl TryFrom<Row> for CreateReplicationSlotResult {
 #[derive(thiserror::Error, Debug)]
 pub enum CreateReplicationSlotError {
   #[error("CREATE_REPLICATION_SLOT must return at least one row, but an empty result was returned")]
-  EmptyResult
+  EmptyResult,
+  #[error(r"Lsn number not provided. LSN number search order:
+  1. if create_replication_slot is executed, then lsn number is selected from the query result
+  2. otherwise selected from the config")]
+  LsnNotProvided,
 }
 
 impl TryFrom<Vec<Row>> for CreateReplicationSlotResult {
@@ -304,4 +337,28 @@ impl TryFrom<Vec<Row>> for CreateReplicationSlotResult {
     }
   }
 }
+
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PgReplicationSlotResult {
+  pub active: Option<bool>,
+  pub restart_lsn: Option<String>,
+  pub confirmed_flush_lsn: Option<String>,
+  pub wal_status: Option<String>,
+}
+
+impl TryFrom<Row> for PgReplicationSlotResult {
+  type Error = anyhow::Error;
+
+  fn try_from(value: Row) -> Result<Self, Self::Error> {
+    Ok(Self {
+      active: value.try_get("active")?,
+      restart_lsn: value.try_get("restart_lsn")?,
+      confirmed_flush_lsn: value.try_get("confirmed_flush_lsn")?,
+      wal_status: value.try_get("wal_status")?,
+    })
+  }
+}
+
 
