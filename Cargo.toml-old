@@ -1,0 +1,50 @@
+[package]
+name = "logicaldecoding"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "logicaldecoding"
+path = "src/bin/main.rs"
+
+[dependencies]
+anyhow = "1.0.66"
+pin-project = "1.1.2"
+futures = { version = "0.3.28", features = ["executor"] }
+futures-util = "0.3.28"
+tokio = { version = "1.29.1", features = ["full", "time"] }
+tokio-util = {version = "0.7.8" }
+tokio-shutdown = { version = "0.1.4" }
+tokio-signal = "0.2.9"
+task-group = "0.2.2"
+ctrlc = "3.4.0"
+signal-hook = {version = "0.3.17", features = ["extended-siginfo"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+uuid = { version = "1.2.1", features = ["serde", "v4"] }
+prost = "0.11.2"
+bytes = "1.4.0"
+byteorder = "1.4"
+adaptive_backoff = "0.2.1"
+
+tokio-stream = { version = "0.1" }
+thiserror = "1"
+clap = { version = "3.1", features = ["std", "derive", "env"], default-features = false }
+dotenv = "0.15"
+url = "2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = { version = "0.8", features = ["url"] }
+once_cell = "1"
+color-backtrace = { version = "0.5" }
+
+postgres-types = { git = "https://github.com/MaterializeInc/rust-postgres" }
+postgres = { git = "https://github.com/MaterializeInc/rust-postgres" }
+postgres-protocol = { git = "https://github.com/MaterializeInc/rust-postgres" }
+tokio-postgres = { git = "https://github.com/MaterializeInc/rust-postgres" }
+
+clickhouse-rs = { path = "/Users/solomatovs/Documents/GitHub/clickhouse-rs", features = ["tls"] }
+
+[dev-dependencies]
+crossbeam-channel = "0.5.6"
+rand = "0.8.5"

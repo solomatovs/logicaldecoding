@@ -9,14 +9,14 @@
           "request": "launch",
           "name": "logicaldecoding",
           "preLaunchTask": "build",
-          "program": "${workspaceFolder}/target/debug/${workspaceRootFolderName}",
+          "program": "${workspaceFolder}/target/debug/examples/t1",
           "env": {
             "PG_DATABASE_URL": "postgres://postgres:password@localhost:5432/postgres",
             "PG_PUBLICATION": "publ",
             "PG_SLOT": "slon",
-            "CH_DATABASE_URL": "tcp://localhost:9001?compression=lz4&ping_timeout=2s&retry_timeout=3s",
+            "CH_DATABASE_URL": "tcp://localhost:9000?compression=lz4&ping_timeout=2s&retry_timeout=3s",
             "RUST_BACKTRACE": "full",
-            "RUST_LOG": "trace",
+            "RUST_LOG": "debug",
           },
           "cwd": "${workspaceFolder}"
       },

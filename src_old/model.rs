@@ -17,6 +17,8 @@ pub struct PgConnectorOpt
     pub pg_url: Url,
     #[clap(long, env = "PG_PUBLICATION")]
     pub pg_publication: Option<String>,
+    #[clap(long, env = "PG_PUBLICATION_PREFIX", default_value = "pub_")]
+    pub pg_publication_prefix: String,
     #[clap(long, env = "PG_SLOT")]
     pub pg_slot: Option<String>,
     #[clap(long, env = "PG_SLOT_TEMP")]
@@ -51,6 +53,20 @@ impl PgConnectorOpt {
     }
   }
 
+  pub fn get_publication_name_from_config_or_generate_if_not_provided(&self) -> String {
+    match &self.pg_publication {
+      Some(publ) => publ.clone(),
+      None => {
+        self.pg_publication_prefix
+        .to_owned() + &SystemTime::now()
+          .duration_since(UNIX_EPOCH)
+          .unwrap()
+          .as_millis()
+          .to_string()
+      }
+    }
+  }
+
   pub fn temporary_slot_if_needed(&self) ->  String {
     self.pg_slot_temp
       .or(Some(false))
@@ -71,7 +87,8 @@ pub struct ChConnectorOpt {
 }
 
 /// One top-level event from the Postgres logical replication stream.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ReplicationEvent {
     /// THe Postgres WAL offset before this event.
     pub wal_start: u64,
@@ -84,7 +101,7 @@ pub struct ReplicationEvent {
 }
 
 /// The payload types of a logical replication event.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum LogicalReplicationMessage {
     /// The beginning of a transaction.
@@ -108,11 +125,11 @@ pub enum LogicalReplicationMessage {
 }
 
 /// A row as it appears in the replication stream
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tuple(pub Vec<TupleData>);
 
 /// A column as it appears in the replication stream
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
     /// Currently may be 0 or 1, representing whether this column is part of the key.
     pub flags: i8,
@@ -124,7 +141,7 @@ pub struct Column {
 }
 
 /// The data of an individual column as it appears in the replication stream
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TupleData {
     /// Represents a NULL value
     Null,
@@ -172,7 +189,7 @@ impl TryInto<String> for &TupleData {
 }
 
 /// A BEGIN statement
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeginBody {
     /// The final logical replication offset (LSN) of the transaction.
     pub final_lsn: u64,
@@ -183,7 +200,7 @@ pub struct BeginBody {
 }
 
 /// The contents of a COMMIT statement
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitBody {
     /// Currently unused, should always be 0.
     pub flags: i8,
@@ -201,14 +218,14 @@ pub struct CommitBody {
 /// databases may also publish their logical replication stream to _other_
 /// downstream followers. In this case, the ORIGIN statement is used to provide
 /// the name of the upstream leader database where the following events originated.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OriginBody {
     pub commit_lsn: u64,
     pub name: String,
 }
 
 /// Describes the REPLICA IDENTITY setting of a table
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReplicaIdentity {
     /// default selection for replica identity (primary key or nothing)
     Default,
@@ -223,7 +240,7 @@ pub enum ReplicaIdentity {
 }
 
 /// A RELATION replication message
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelationBody {
     /// The OID of the relation (e.g. table) being referred to.
     pub rel_id: u32,
@@ -238,7 +255,7 @@ pub struct RelationBody {
 }
 
 /// A Type replication message
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeBody {
     pub id: u32,
     pub namespace: String,
@@ -246,7 +263,7 @@ pub struct TypeBody {
 }
 
 /// An INSERT statement
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertBody {
     /// The ID of the relation the data is inserted to (i.e. table OID).
     pub rel_id: u32,
@@ -255,7 +272,7 @@ pub struct InsertBody {
 }
 
 /// An UPDATE statement
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateBody {
     /// The ID of the relation the data is being updated in (i.e. table OID).
     pub rel_id: u32,
@@ -268,7 +285,7 @@ pub struct UpdateBody {
 }
 
 /// A DELETE statement
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteBody {
     /// The ID of the relation being deleted (i.e. table OID).
     pub rel_id: u32,
@@ -279,7 +296,7 @@ pub struct DeleteBody {
 }
 
 /// A TRUNCATE statement
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TruncateBody {
     /// Option bits for TRUNCATE: 1 for CASCADE, 2 for RESTART IDENTITY
     pub options: i8,
@@ -288,7 +305,7 @@ pub struct TruncateBody {
 }
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateReplicationSlotResult {
   pub slot_name: String,
   pub consistent_point: String,
@@ -340,7 +357,7 @@ impl TryFrom<Vec<Row>> for CreateReplicationSlotResult {
 
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PgReplicationSlotResult {
   pub active: Option<bool>,
   pub restart_lsn: Option<String>,
