@@ -1,35 +1,30 @@
-use log::trace;
+use std::path::PathBuf;
 use anyhow::{Result, Error};
 
-use dynamic_reload::{DynamicReload, Lib, PlatformName, Search, Symbol, UpdateState};
+use dynamic_reload::{DynamicReload, Lib, Search, UpdateState};
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-
 
 use crate::app::AppConfig;
 use crate::arg::Args;
+use super::FindError;
+
 
 pub struct App {
+    is_shutdown: bool,
     config: AppConfig,
     plugins: Vec<Arc<Lib>>,
     reload_handler: DynamicReload,
 }
 
-impl Drop for App {
-    fn drop(&mut self) {
-        trace!("drop app...");
-        trace!("drop app success");
-    }
-}
 
 impl App {
     pub fn new() -> Result<App, Error> {
-        let config = Args::config_merge_args()?;
+        let config = Args::conf_merge_args()?;
         let reload_handler = Self::build_dinamic_reload_handler(&config);
 
         Ok(Self {
             config,
+            is_shutdown: false,
             plugins: Vec::new(),
             reload_handler,
         })
@@ -65,8 +60,28 @@ impl App {
     pub fn resize_term(&self) {}
     pub fn reload_config(&self) {}
     pub fn print_stats(&self) {}
-    pub fn tick(&mut self) {
+    pub fn set_shutdown(&mut self) {
+        self.is_shutdown = true;
+    }
+    
+    fn is_shutdown_complite(&self) -> bool {
+        self.is_shutdown && self.plugins.len() > 0
+    }
 
+    fn is_shutdown_running(&self) -> bool {
+        self.is_shutdown
+    }
+
+    pub fn next(&mut self) -> bool {
+        if self.is_shutdown_complite() {
+            return false
+        }
+
+        if self.is_shutdown_running() {
+            self.plugins.pop();
+        }
+
+        true
     }
 
     pub fn build_dinamic_reload_handler(config: &AppConfig) -> DynamicReload {
@@ -89,3 +104,4 @@ impl App {
         // }
     }
 }
+

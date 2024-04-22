@@ -24,7 +24,7 @@ impl<T> Args<T>
 where
     T: ClapSerde,
 {
-    pub fn config_merge_args() -> Result<T, ConfigParseError> {
+    pub fn conf_merge_args() -> Result<T, ConfigParseError> {
         let mut args = Args::<T>::parse();
 
         let config = if let Ok(f) = File::open(&args.config_path) {

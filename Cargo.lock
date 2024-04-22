@@ -427,6 +427,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "daro"
+version = "0.1.0"
+dependencies = [
+ "anstyle",
+ "anyhow",
+ "clap",
+ "clap-serde-derive",
+ "clickhouse-rs",
+ "confy",
+ "ctrlc",
+ "dynamic_reload",
+ "env_logger",
+ "log",
+ "postgres",
+ "postgres-protocol",
+ "postgres-types",
+ "rand",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_yaml",
+ "signal-hook",
+ "tokio-postgres",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -476,16 +505,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
 
 [[package]]
-name = "env_logger"
-version = "0.10.2"
+name = "env_filter"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
+checksum = "a009aa4810eb158359dda09d0c87378e4bbb89b5a801f016885a4707ba24f7ea"
 dependencies = [
- "humantime",
- "is-terminal",
  "log",
  "regex",
- "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38b35839ba51819680ba087cd351788c9a3c476841207e0b8cee0b04722343b9"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "env_filter",
+ "humantime",
+ "log",
 ]
 
 [[package]]
@@ -733,17 +772,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "is-terminal"
-version = "0.4.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f23ff5ef2b80d608d61efee834934d862cd92461afc0560dedf493e4c033738b"
-dependencies = [
- "hermit-abi",
- "libc",
- "windows-sys 0.52.0",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -824,34 +852,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "logicaldecoding"
-version = "0.1.0"
-dependencies = [
- "anstyle",
- "anyhow",
- "clap",
- "clap-serde-derive",
- "clickhouse-rs",
- "confy",
- "ctrlc",
- "dynamic_reload",
- "env_logger",
- "log",
- "postgres",
- "postgres-protocol",
- "postgres-types",
- "rand",
- "serde",
- "serde_derive",
- "serde_json",
- "serde_yaml",
- "signal-hook",
- "tokio-postgres",
- "toml",
- "tracing",
 ]
 
 [[package]]
@@ -1008,6 +1008,10 @@ name = "once_cell"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
+
+[[package]]
+name = "one"
+version = "0.1.0"
 
 [[package]]
 name = "openssl"
@@ -1325,9 +1329,9 @@ checksum = "d626bb9dae77e28219937af045c257c28bfd3f69333c512553507f5f9798cb76"
 
 [[package]]
 name = "rustix"
-version = "0.38.32"
+version = "0.38.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65e04861e65f21776e67888bfbea442b3642beaa0138fdb1dd7a84a52dffdb89"
+checksum = "e3cc72858054fcff6d7dea32df2aeaee6a7c24227366d7ea429aada2f26b16ad"
 dependencies = [
  "bitflags 2.5.0",
  "errno",
@@ -1559,15 +1563,6 @@ dependencies = [
  "fastrand",
  "rustix",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
 ]
 
 [[package]]

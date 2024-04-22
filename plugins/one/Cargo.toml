@@ -1,0 +1,11 @@
+[package]
+name = "one"
+version = "0.1.0"
+authors = ["Solomatov Sergei"]
+edition = "2021"
+
+[lib]
+name = "one"
+crate-type = ["cdylib"]
+
+[dependencies]

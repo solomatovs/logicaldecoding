@@ -1,10 +1,8 @@
 use anyhow::{Result, Error};
-use log::debug;
+use log::{debug, info, error};
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-
-use log::info;
 
 use signal_hook::consts::signal::*;
 use signal_hook::consts::TERM_SIGNALS;
@@ -15,18 +13,19 @@ use signal_hook::iterator::exfiltrator::WithOrigin;
 use signal_hook::iterator::SignalsInfo;
 use signal_hook::low_level;
 
-use logicaldecoding::arg::Args;
-use logicaldecoding::app::{App, AppConfig};
+
+use daro::arg::Args;
+use daro::app::{App, AppConfig};
 
 fn main() -> Result<(), Error> {
-    let config = Args::<AppConfig>::config_merge_args()?;
+    let config = Args::<AppConfig>::conf_merge_args()?;
 
     env_logger::builder()
         .parse_default_env()
         .filter_level(config.log_level())
         .init();
 
-    // config.write_yaml(format!(".{}.yml", "config").as_str());
+    // config.write_yaml(format!(".{}.yml", "config").as_str())?;
     config.print()?;
 
     let mut app = App::new()?;
@@ -59,7 +58,7 @@ fn main() -> Result<(), Error> {
 
     let mut has_terminal = true;
 
-    'outer: loop {
+    while app.next() {
         for info in &mut signals.pending() {
             // Will print info about signal + where it comes from.
             info!("Received a signal {:?}", info.signal);
@@ -83,15 +82,12 @@ fn main() -> Result<(), Error> {
                 SIGWINCH => app.resize_term(),
                 SIGHUP => app.reload_config(),
                 SIGUSR1 => app.print_stats(),
-                term_sig => {
-                    eprintln!("Terminating");
-                    assert!(TERM_SIGNALS.contains(&term_sig));
-                    break 'outer;
+                _ => {
+                    error!("starting shutdown...");
+                    app.set_shutdown();
                 }
             }
         }
-
-        app.tick();
 
         std::thread::sleep(config.sleep);
     }

@@ -2,10 +2,11 @@ use std::{
     net::IpAddr, net::Ipv4Addr, net::Ipv6Addr, net::ToSocketAddrs, num::ParseIntError,
     time::Duration,
 };
+use anyhow::{Result, Error};
 
 use crate::app::ParseLogLevelError;
 
-type Error = Box<dyn std::error::Error>;
+// type Error = Box<dyn std::error::Error>;
 
 pub(crate) fn validate_log_level_str(arg: &str) -> Result<String, ParseLogLevelError> {
     let arg = arg.to_lowercase();
@@ -44,7 +45,7 @@ pub(crate) fn parse_ip(s: &str) -> Result<(IpAddr, Option<u16>), Error> {
         return Ok((IpAddr::V6(addr), None));
     };
 
-    Err(format!("error parsing ip/host:port (or ip/host) from value: {s}").into())
+    Err(anyhow::format_err!("error parsing ip/host:port (or ip/host) from value: {s}"))
 }
 
 pub(crate) fn parse_duration(arg: &str) -> Result<Duration, ParseIntError> {
