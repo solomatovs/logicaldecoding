@@ -19,6 +19,21 @@ dymod_2! {
      }
 }
 
+pub struct Sss {
+    pub tt: fn(),
+}
+
+impl Sss {
+    fn one() {
+
+    }
+    fn new() -> Self {
+        Self {
+            tt: Self::one,
+        }
+    }
+}
+
 
 pub struct App {
     is_shutdown: bool,
@@ -95,10 +110,11 @@ impl App {
             self.plugins.pop();
         }
 
+        let s = Sss::new();
+        (s.tt)();
+
         for p in &self.plugins {
-            if let Err(e) = p.init() {
-                error!("init error: {e}");
-            }
+            p.init();
         }
 
         true

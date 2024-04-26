@@ -15,6 +15,7 @@ macro_rules! dymod_2 {
       use std::io;
       use std::path::Path;
       use std::ffi::{OsStr, OsString};
+      use std::os::raw::c_void;
       use std::collections::HashMap;
       use std::thread::sleep;
       use std::sync::TryLockError;
@@ -27,63 +28,82 @@ macro_rules! dymod_2 {
       $(
         pub struct $struct_name {
           file_path: OsString,
-          dy: RwLock<Library>,
+        //   dy: RwLock<Library>,
+          
+          $(
+            $fnname: fn($($argtype),*) $(-> $returntype)?,
+          )*
         }
         
         impl $struct_name {
           pub fn new(file_path: OsString) -> Result<$struct_name, Error> {
-            let dy = unsafe {Library::new(&file_path)?};
+            let lib = unsafe {Library::new(&file_path)?};
 
             let res = $struct_name {
               file_path,
-              dy: RwLock::new(dy),
+            //   dy: RwLock::new(lib),
+              $(
+                $fnname: {
+                    let symbol = unsafe {
+                        lib.get(stringify!($fnname).as_bytes())
+                    }?;
+
+                    *symbol
+                    // let my = unsafe {lib.get(stringify!($fnname).as_bytes())}?;
+                    // *my
+                },
+              )*
             };
 
             Ok(res)
           }
 
-          pub fn reload(&mut self) -> Result<(), Error> {
-            let dy_new = unsafe {Library::new(&self.file_path)?};
+        //   pub fn reload(&mut self) -> Result<(), Error> {
+        //     let dy_new = unsafe {Library::new(&self.file_path)?};
             
-            loop {
-              match self.dy.try_write() {
-                Ok(mut dy) => {
-                  *dy = dy_new;
-                  break;
-                },
-                Err(TryLockError::WouldBlock) => sleep(std::time::Duration::from_millis(500)),
-                Err(TryLockError::Poisoned(_)) => {
-                  println!("The library is poisoned");
-                  let res = $struct_name {
-                    file_path: self.file_path.clone(),
-                    dy: RwLock::new(dy_new),
-                  };
+        //     loop {
+        //       match self.dy.try_write() {
+        //         Ok(mut dy) => {
+        //           *dy = dy_new;
+        //           break;
+        //         },
+        //         Err(TryLockError::WouldBlock) => sleep(std::time::Duration::from_millis(500)),
+        //         Err(TryLockError::Poisoned(_)) => {
+        //           println!("The library is poisoned");
+        //           let res = $struct_name {
+        //             file_path: self.file_path.clone(),
+        //             dy: RwLock::new(dy_new),
+        //           };
 
-                  break;
-                },
-              }
-            }
+        //           break;
+        //         },
+        //       }
+        //     }
 
-            Ok(())
-          }
-
-          $(
-            pub fn $fnname(&self, $($argname: $argtype),*) -> Result<($($returntype)?), Error> {
-              loop {
-                {
-                //   let symbol_signature = concat!("fn ", stringify!($fnname), "(", stringify!($($argtype)*), ")", stringify!($(-> $returntype)*));
-                  
-                  let lib = self.dy.read().unwrap();
-
-                  let symbol: Symbol<fn($($argtype),*) $(-> $returntype)?> = unsafe {
-                    lib.get(stringify!($fnname).as_bytes())
-                  }?;
-                  
-                  return Ok(symbol($($argname),*))
-                }
-              };
+        //     Ok(())
+        //   }
+        $(
+            pub fn $fnname(&self, $($argname: $argtype),*) -> ($($returntype)?) {
+                (self.$fnname)($($argname),*)
             }
           )*
+        //   $(
+        //     pub fn $fnname(&self, $($argname: $argtype),*) -> Result<($($returntype)?), Error> {
+        //       loop {
+        //         {
+        //         //   let symbol_signature = concat!("fn ", stringify!($fnname), "(", stringify!($($argtype)*), ")", stringify!($(-> $returntype)*));
+                  
+        //           let lib = self.dy.read().unwrap();
+
+        //           let symbol: Symbol<fn($($argtype),*) $(-> $returntype)?> = unsafe {
+        //             lib.get(stringify!($fnname).as_bytes())
+        //           }?;
+                  
+        //           return Ok(symbol($($argname),*))
+        //         }
+        //       };
+        //     }
+        //   )*
         }
       )*
     }
