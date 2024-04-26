@@ -1,6 +1,6 @@
 use std::{time::Duration};
-use std::path::PathBuf;
-use std::ffi::OsStr;
+
+use std::ffi::{OsStr, OsString};
 use anyhow::{Result, Error};
 
 use log::{trace, LevelFilter};
@@ -83,14 +83,14 @@ impl AppConfig {
     // }
 
 
-    fn read_dynlib_from_folder(folder: &str) -> Result<DylibIterator> {
-        Ok(DylibIterator::new(std::fs::read_dir(folder)?))
+    pub fn search_libs(&self) -> Result<DylibIterator> {
+        Ok(DylibIterator::new(std::fs::read_dir(self.search_paths.clone())?))
     }
 }
 
 
 #[derive(Debug)]
-struct DylibIterator {
+pub struct DylibIterator {
     read_dir: std::fs::ReadDir,
 }
 
@@ -128,31 +128,35 @@ impl DylibIterator {
 
 
 impl Iterator for DylibIterator {
-    type Item = Result<String, std::io::Error>;
+    type Item = Result<OsString, std::io::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let res = self.read_dir.next().map_or_else(
-                || return None,
+                || None,
                 |f| f.map_or_else(
                     |e| return Some(Err(e)),
                     |entry| Some(Ok(entry.path())),
                 ),
             );
 
+            if let None = res {
+                return None;
+            }
+
             let res = res.unwrap().unwrap();
 
             let res = res.extension()
                 .and_then(OsStr::to_str)
                 .map_or(None, |ext| if ext.to_lowercase() == Self::suffix() {
-                        Some(ext.to_owned())
+                        Some(res.as_os_str().to_owned())
                     } else {
                         None
                     }
                 );
 
             if res.is_some() {
-                return Some(Ok(res?));
+                return Some(Ok(res.unwrap()));
             } 
         }
     }

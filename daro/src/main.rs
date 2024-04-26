@@ -29,6 +29,7 @@ fn main() -> Result<(), Error> {
     config.print()?;
 
     let mut app = App::new()?;
+    app.reload_config();
 
     // Make sure double CTRL+C and similar kills
     let term_now = Arc::new(AtomicBool::new(false));

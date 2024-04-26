@@ -9,7 +9,7 @@
           "request": "launch",
           "name": "logicaldecoding",
           "preLaunchTask": "build",
-          "program": "${workspaceFolder}/target/debug/examples/t1",
+          "program": "${workspaceFolder}/target/debug/daro",
           "env": {
             "PG_DATABASE_URL": "postgres://postgres:password@localhost:5432/postgres",
             "PG_PUBLICATION": "publ",

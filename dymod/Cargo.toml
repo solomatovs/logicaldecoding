@@ -1,0 +1,14 @@
+[package]
+name = "dymod"
+version = "0.1.0"
+authors = ["solomatovs <solomatovs@gmail.com>"]
+edition = "2021"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libloading = { version = "0.7", optional = true }
+
+[features]
+default = ["auto-reload", "libloading"]
+force-static = []
+force-dynamic = ["libloading"]
+auto-reload = []
