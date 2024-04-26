@@ -14,6 +14,7 @@ macro_rules! dymod_2 {
 
       use std::io;
       use std::path::Path;
+      use std::ffi::{OsStr, OsString};
       use std::collections::HashMap;
       use std::thread::sleep;
       use std::sync::TryLockError;
@@ -25,16 +26,16 @@ macro_rules! dymod_2 {
 
       $(
         pub struct $struct_name {
-          file_path: String,
+          file_path: OsString,
           dy: RwLock<Library>,
         }
         
         impl $struct_name {
-          pub fn new(file_path: &str) -> Result<$struct_name, Error> {
+          pub fn new(file_path: OsString) -> Result<$struct_name, Error> {
             let dy = unsafe {Library::new(&file_path)?};
 
             let res = $struct_name {
-              file_path: file_path.to_string(),
+              file_path,
               dy: RwLock::new(dy),
             };
 
@@ -70,7 +71,7 @@ macro_rules! dymod_2 {
             pub fn $fnname(&self, $($argname: $argtype),*) -> Result<($($returntype)?), Error> {
               loop {
                 {
-                  let symbol_signature = concat!("fn ", stringify!($fnname), "(", stringify!($($argtype)*), ")", stringify!($(-> $returntype)*));
+                //   let symbol_signature = concat!("fn ", stringify!($fnname), "(", stringify!($($argtype)*), ")", stringify!($(-> $returntype)*));
                   
                   let lib = self.dy.read().unwrap();
 

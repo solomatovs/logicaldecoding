@@ -437,6 +437,7 @@ dependencies = [
  "clickhouse-rs",
  "confy",
  "ctrlc",
+ "dymod",
  "dynamic_reload",
  "env_logger",
  "libloading 0.8.3",

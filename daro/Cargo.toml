@@ -37,5 +37,7 @@ tokio-postgres = { git = "https://github.com/MaterializeInc/rust-postgres" }
 
 clickhouse-rs = { path = "/Users/solomatovs/Documents/GitHub/clickhouse-rs", features = ["tls"] }
 
+dymod = { path = "../dymod" }
+
 [dev-dependencies]
 rand = "0.8.5"

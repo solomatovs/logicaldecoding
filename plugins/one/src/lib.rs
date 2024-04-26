@@ -1,10 +1,11 @@
+use std::println;
 
 #[no_mangle]
-pub fn init() -> i32 {
-    448999
+pub fn init() {
+    println!("init: 1");
 }
 
 #[no_mangle]
-pub fn de_init() -> i32 {
-    448999
+pub fn deinit() {
+    println!("deinit: 1");
 }
