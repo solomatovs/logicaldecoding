@@ -1,45 +1,29 @@
 
 use anyhow::{Result, Error};
-
-use dynamic_reload::{DynamicReload, Lib, Search, UpdateState, PlatformName};
 use log::{warn, error};
-use std::sync::Arc;
 
 use crate::app::AppConfig;
 use crate::arg::Args;
+
 
 use dymod::dymod_2;
 
 dymod_2! {
      pub mod subcrate {
-        pub struct my_struct {
+        pub struct MainPlugin {
             fn init();
             fn deinit();
         }
      }
 }
 
-pub struct Sss {
-    pub tt: fn(),
-}
-
-impl Sss {
-    fn one() {
-
-    }
-    fn new() -> Self {
-        Self {
-            tt: Self::one,
-        }
-    }
-}
 
 
 pub struct App {
     is_shutdown: bool,
     config: AppConfig,
     // plugins: Vec<Arc<Lib>>,
-    plugins: Vec<subcrate::my_struct>
+    plugins: Vec<subcrate::MainPlugin>
     // reload_handler: DynamicReload,
 }
 
@@ -109,13 +93,18 @@ impl App {
         if self.is_shutdown_running() {
             self.plugins.pop();
         }
-
-        let s = Sss::new();
-        (s.tt)();
-
         for p in &self.plugins {
             p.init();
+            p.deinit();
         }
+
+        for p in self.plugins.iter_mut() {
+            // if let Err(e) = p.reload() {
+            //     error!("reload plugin error: {e}");
+            // }
+        }
+
+
 
         true
     }
@@ -166,7 +155,7 @@ impl App {
             Ok(x) => {
                 for lib in x {
                     if let Ok(lib) = lib {
-                        match subcrate::my_struct::new(lib) {
+                        match subcrate::MainPlugin::new(lib) {
                             Ok(lib) => self.plugins.push(lib),
                             Err(e) => {
                                 println!("Unable to load dynamic lib, err {:?}", e);

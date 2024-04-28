@@ -494,6 +494,7 @@ name = "dymod"
 version = "0.1.0"
 dependencies = [
  "libloading 0.7.4",
+ "thiserror",
 ]
 
 [[package]]
