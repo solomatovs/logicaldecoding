@@ -1,9 +1,7 @@
-pub(crate) mod err;
-pub(crate) mod help;
-
-pub mod config;
 pub mod app;
+pub mod config;
+pub mod err;
 
-pub use config::AppConfig;
-pub use err::{ParseLogLevelError, FindError};
 pub use app::App;
+pub use config::{AppConfig, NextType};
+pub use err::FindError;

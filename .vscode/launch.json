@@ -10,6 +10,9 @@
           "name": "logicaldecoding",
           "preLaunchTask": "build",
           "program": "${workspaceFolder}/target/debug/daro",
+          "args": [
+            "--log-level", "debug",
+          ],
           "env": {
             "PG_DATABASE_URL": "postgres://postgres:password@localhost:5432/postgres",
             "PG_PUBLICATION": "publ",

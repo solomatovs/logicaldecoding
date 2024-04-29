@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::collections::{hash_map, HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, Thread, ThreadId};
 
 pub struct LockByName {
@@ -24,13 +24,13 @@ impl LockByName {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 map: HashMap::new(),
-            }))
+            })),
         }
     }
-    
+
     pub fn lock(&self, name: &str) -> NamedGuard {
         let me = thread::current();
-        
+
         // Add myself to queue.
         {
             let mut lock = self.inner.lock().unwrap();
@@ -43,7 +43,7 @@ impl LockByName {
                         current: me.id(),
                         queue: VecDeque::new(),
                     });
-                    
+
                     return NamedGuard {
                         inner: self.inner.clone(),
                         key: name.to_string(),
@@ -51,14 +51,14 @@ impl LockByName {
                 }
             }
         }
-        
+
         // Wait until its my turn.
         loop {
             std::thread::park();
-            
+
             let mut lock = self.inner.lock().unwrap();
             let entry = lock.map.get_mut(name).unwrap();
-            
+
             if entry.current == me.id() {
                 return NamedGuard {
                     inner: self.inner.clone(),
@@ -73,7 +73,7 @@ impl Drop for NamedGuard {
     fn drop(&mut self) {
         let mut lock = self.inner.lock().unwrap();
         let entry = lock.map.get_mut(&self.key).unwrap();
-        
+
         if let Some(next) = entry.queue.pop_front() {
             entry.current = next.id();
             drop(lock);

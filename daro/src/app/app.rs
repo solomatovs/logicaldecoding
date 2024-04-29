@@ -1,14 +1,21 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
-use anyhow::{Result, Error};
-use log::{warn, error};
+use anyhow::Result;
+use log::{debug, error, info, warn};
+use signal_hook::consts::signal::{SIGCONT, SIGHUP, SIGTSTP, SIGUSR1, SIGUSR2, SIGWINCH};
+use signal_hook::consts::TERM_SIGNALS;
+use signal_hook::flag;
+use signal_hook::iterator::exfiltrator::WithOrigin;
+use signal_hook::iterator::SignalsInfo;
+use signal_hook::low_level;
 
-use crate::app::AppConfig;
+use crate::app::{AppConfig, NextType};
 use crate::arg::Args;
 
+use dymod::dymod;
 
-use dymod::dymod_2;
-
-dymod_2! {
+dymod! {
      pub mod subcrate {
         pub struct MainPlugin {
             fn init();
@@ -17,157 +24,221 @@ dymod_2! {
      }
 }
 
-
-
 pub struct App {
     is_shutdown: bool,
+    has_terminal: bool,
     config: AppConfig,
-    // plugins: Vec<Arc<Lib>>,
-    plugins: Vec<subcrate::MainPlugin>
-    // reload_handler: DynamicReload,
+    signals: SignalsInfo<WithOrigin>,
+    plugins: Vec<subcrate::MainPlugin>,
+    cache: String,
 }
 
-
 impl App {
-    pub fn new() -> Result<App, Error> {
-        let config = Args::conf_merge_args()?;
-        // let reload_handler = Self::build_reload_handler(&config);
+    pub fn new() -> Result<App> {
+        let config = Args::<AppConfig>::conf_merge_args()?;
 
-        Ok(Self {
+        Self::print_hello();
+
+        let mut res = Self {
             config,
+            signals: Self::signal_bootstrap()?,
+            has_terminal: true,
             is_shutdown: false,
             plugins: Vec::new(),
-            // reload_handler,
-        })
+            cache: String::new(),
+        };
+
+        res.reload_plugin()?;
+
+        res.print_state()?;
+
+        Ok(res)
     }
-
-    // fn add_plugin(&mut self, plugin: Arc<Lib>) {
-    //     self.plugins.push(plugin);
-    // }
-
-    // fn unload_plugins(&mut self, lib: &Arc<Lib>) {
-    //     for i in (0..self.plugins.len()).rev() {
-    //         if &self.plugins[i] == lib {
-    //             self.plugins.swap_remove(i);
-    //         }
-    //     }
-    // }
-
-    // fn reload_plugin(&mut self, lib: &Arc<Lib>) {
-    //     Self::add_plugin(self, lib);
-    // }
-
-    // called when a lib needs to be reloaded.
-    // fn reload_callback(&mut self, state: UpdateState, lib: Option<&Arc<Lib>>) {
-    //     match state {
-    //         UpdateState::Before => Self::unload_plugins(self, lib.unwrap()),
-    //         UpdateState::After => Self::reload_plugin(self, lib.unwrap()),
-    //         UpdateState::ReloadFailed(_) => println!("Failed to reload"),
-    //     }
-    // }
 
     pub fn restore_term(&self) {}
     pub fn claim_term(&self) {}
     pub fn resize_term(&self) {}
-    pub fn reload_config(&mut self) {
-        self.reload_lib();
+    pub fn reload_config(&mut self) -> Result<()> {
+        Ok(self.config = Args::conf_merge_args()?)
     }
-    pub fn print_stats(&self) {}
-    pub fn set_shutdown(&mut self) {
+    pub fn print_hello() {
+        info!("daro app");
+        if let Ok(wd) = std::env::current_dir() {
+            info!("working directory: {:?}", wd);
+        }
+    }
+    pub fn print_state(&self) -> Result<()> {
+        self.config.print()
+    }
+    pub fn shutdown_start(&mut self) {
+        info!("shutdown...");
         self.is_shutdown = true;
     }
-    
-    fn is_shutdown_complite(&self) -> bool {
+
+    pub fn shutdown_stop(&mut self) {
+        self.is_shutdown = false;
+    }
+
+    fn shutdown_is_complite(&self) -> bool {
         self.is_shutdown && self.plugins.len() > 0
     }
 
-    fn is_shutdown_running(&self) -> bool {
+    fn shutdown_is_running(&self) -> bool {
         self.is_shutdown
     }
 
-    pub fn next(&mut self) -> bool {
-        if self.is_shutdown_complite() {
-            return false
+    pub fn next(&mut self) -> Result<bool> {
+        if self.shutdown_is_complite() {
+            return Ok(false);
         }
 
-        if self.is_shutdown_running() {
+        if self.shutdown_is_running() {
             self.plugins.pop();
         }
-        for p in &self.plugins {
+
+        for p in self.plugins.iter() {
             p.init();
             p.deinit();
         }
 
-        for p in self.plugins.iter_mut() {
-            // if let Err(e) = p.reload() {
-            //     error!("reload plugin error: {e}");
-            // }
-        }
-
-
-
-        true
+        Ok(true)
     }
 
-    // pub fn build_reload_handler(config: &AppConfig) -> DynamicReload {
-    //     DynamicReload::new(
-    //         Some(vec![&config.search_paths]),
-    //         Some(&config.shadow_dir),
-    //         Search::Default,
-    //         config.debounce_duration,
-    //     )
-    //     // // test_shared is generated in build.rs
-    //     // match unsafe {
-    //     //     reload_handler.add_library("test_shared", PlatformName::Yes)
-    //     // } {
-    //     //     Ok(lib) => self.add_plugin(&lib),
-    //     //     Err(e) => {
-    //     //         println!("Unable to load dynamic lib, err {:?}", e);
-    //     //         return;
-    //     //     }
-    //     // }
-    // }
+    fn signal_bootstrap() -> Result<SignalsInfo<WithOrigin>> {
+        // Make sure double CTRL+C and similar kills
+        let term_now = Arc::new(AtomicBool::new(false));
+        for sig in TERM_SIGNALS {
+            // When terminated by a second term signal, exit with exit code 1.
+            // This will do nothing the first time (because term_now is false).
+            flag::register_conditional_shutdown(*sig, 1, Arc::clone(&term_now))?;
+            // But this will "arm" the above for the second time, by setting it to true.
+            // The order of registering these is important, if you put this one first, it will
+            // first arm and then terminate ‒ all in the first round.
+            flag::register(*sig, Arc::clone(&term_now))?;
+        }
 
-    // pub fn reload_lib(&mut self) {
-    //     match self.config.search_libs() {
-    //         Ok(x) => {
-    //             for lib in x {
-    //                 if let Ok(lib) = lib {
-    //                     match unsafe {
-    //                         self.reload_handler.add_library(lib.to_str().unwrap(), PlatformName::No)
-    //                     } {
-    //                         Ok(lib) => self.add_plugin(lib),
-    //                         Err(e) => {
-    //                             println!("Unable to load dynamic lib, err {:?}", e);
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //         Err(e) => {
-    //             warn!(r"search libs error: {e}");
-    //         }
-    //     };
-    // }
+        // Subscribe to all these signals with information about where they come from. We use the
+        // extra info only for logging in this example (it is not available on all the OSes or at
+        // all the occasions anyway, it may return `Unknown`).
+        let mut sigs = vec![
+            // Some terminal handling
+            SIGTSTP, SIGCONT, SIGWINCH,
+            // Reload of configuration for daemons ‒ um, is this example for a TUI app or a daemon
+            // O:-)? You choose...
+            SIGHUP, // Application-specific action, to print some statistics.
+            SIGUSR1, SIGUSR2,
+        ];
 
-    pub fn reload_lib(&mut self) {
+        sigs.extend(TERM_SIGNALS);
+
+        Ok(SignalsInfo::<WithOrigin>::new(&sigs)?)
+    }
+
+    pub fn signal_processing(&mut self) {
+        for info in &mut self.signals.pending() {
+            // Will print info about signal + where it comes from.
+            info!("received a signal {:?}", info.signal);
+            debug!("{:?}", info);
+            match info.signal {
+                SIGTSTP => {
+                    // Restore the terminal to non-TUI mode
+                    if self.has_terminal {
+                        self.restore_term();
+                        self.has_terminal = false;
+                        if let Err(e) = low_level::emulate_default_handler(SIGTSTP) {
+                            error!("{:#?}", e);
+                        }
+                    }
+                }
+                SIGCONT => {
+                    if !self.has_terminal {
+                        self.claim_term();
+                        self.has_terminal = true;
+                    }
+                }
+                SIGWINCH => self.resize_term(),
+                SIGHUP => {
+                    if let Err(e) = self.reload_config() {
+                        error!("config reload failed");
+                        error!("{}", e);
+                    }
+                }
+                SIGUSR1 => {
+                    if let Err(e) = self.print_state() {
+                        error!("print state failed");
+                        error!("{}", e);
+                    }
+                }
+                SIGUSR2 => {
+                    if let Err(e) = self.reload_plugin() {
+                        error!("plugin reload failed");
+                        error!("{}", e);
+                    }
+                }
+                _ => {
+                    self.shutdown_start();
+                }
+            }
+        }
+    }
+
+    pub fn reload_plugin(&mut self) -> Result<()> {
+        if self.plugins.len() > 0 {
+            info!("unloading plugins...");
+            while let Some(p) = self.plugins.pop() {
+                info!("{:?}", p);
+                debug!("{:#?}", p);
+            }
+        }
+
         match self.config.search_libs() {
             Ok(x) => {
                 for lib in x {
-                    if let Ok(lib) = lib {
-                        match subcrate::MainPlugin::new(lib) {
-                            Ok(lib) => self.plugins.push(lib),
+                    if let Ok(lib_path) = lib {
+                        if let Some(p) = lib_path.to_str() {
+                            info!("loading plugin: {}", p);
+                        }
+
+                        match subcrate::MainPlugin::new(lib_path) {
+                            Ok(lib) => {
+                                debug!("{:#?}", lib);
+                                info!("loading plugin success");
+                                self.plugins.push(lib);
+                            }
                             Err(e) => {
-                                println!("Unable to load dynamic lib, err {:?}", e);
+                                error!("loading plugin error");
+                                error!("{}", e);
                             }
                         }
+                    } else if let Err(e) = lib {
+                        error!("{}", e);
                     }
                 }
             }
             Err(e) => {
-                warn!(r"search libs error: {e}");
+                warn!("search libs error");
+                warn!("{:#?}", e);
             }
         };
+
+        Ok(())
+    }
+
+    pub fn wait(&mut self) {
+        if let NextType::Sleep = self.config.main_next_type {
+            self.wait_sleep_duration();
+        } else {
+            self.wait_press_enter();
+        }
+    }
+
+    fn wait_sleep_duration(&self) {
+        std::thread::sleep(self.config.main_next_sleep);
+    }
+
+    fn wait_press_enter(&mut self) {
+        if let Err(_) = std::io::stdin().read_line(&mut self.cache) {
+            self.wait_sleep_duration();
+        }
     }
 }
-

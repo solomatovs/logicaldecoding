@@ -2,14 +2,12 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Result};
 
-
-
 // #[derive(Debug, Default, PartialEq, Eq)]
 // pub struct ConfigParseError(pub OsString, pub String);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfigParseError {
-   ConfigParsingError(OsString, String),
+    ConfigParsingError(OsString, String),
 }
 
 impl Error for ConfigParseError {}

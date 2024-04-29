@@ -54,7 +54,7 @@ where
                         err.to_string(),
                     ));
                 }
-            }
+            },
             Err(e) => {
                 return Err(ConfigParseError::ConfigParsingError(
                     config_path.into_os_string(),
