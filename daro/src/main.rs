@@ -3,10 +3,11 @@ use log::{error, info};
 
 use daro::app::App;
 use daro::arg::Args;
-use daro::log::LogConfig;
+use daro::app::AppConfig;
 
 fn main() -> Result<()> {
-    let config = Args::<LogConfig>::conf_merge_args()?;
+    // let config = Args::<LogConfig>::conf_merge_args()?;
+    let config = Args::<AppConfig>::conf_merge_args()?;
 
     env_logger::builder()
         .filter_level(config.log_level())

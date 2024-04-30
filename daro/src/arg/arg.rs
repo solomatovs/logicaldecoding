@@ -1,5 +1,9 @@
 use std::{fs::File, io::BufReader, path::PathBuf};
 
+use anyhow::Result;
+use log::info;
+
+use clap::{CommandFactory, FromArgMatches};
 use clap_serde_derive::{
     clap::{self, Parser},
     ClapSerde,
@@ -7,6 +11,12 @@ use clap_serde_derive::{
 use serde_derive::Deserialize;
 
 use super::ConfigParseError;
+
+// lazy_static! {
+//     pub static ref ARGS: Args =
+//         Args::from_arg_matches_mut(&mut Args::command().ignore_errors(true).get_matches(),)
+//             .unwrap();
+// }
 
 #[derive(Parser, Deserialize)]
 #[command(author, version, about, long_about = None, next_line_help = true, term_width = 0, styles=get_styles())]
@@ -20,23 +30,32 @@ pub struct Args<T: ClapSerde> {
     pub config: <T as ClapSerde>::Opt,
 }
 
+
 impl<T> Args<T>
 where
     T: ClapSerde,
 {
-    pub fn conf_merge_args() -> Result<T, ConfigParseError> {
-        let mut args = Args::<T>::parse();
+    pub fn conf_merge_args() -> Result<T> {
+        // let mut args = Args::<T>::parse();
+        let command = Args::<T>::command()
+            // .multicall(true)
+            .ignore_errors(true)
+            // .arg_required_else_help(false)
+        ;
 
+
+        // for o in command.get_opts() {
+        //     info!("{:#?}", o);
+        // }
+        // T::from(command.get_opts());
+        
+        // todo!();
+        let mut args = command.try_get_matches()?;
+        let mut args = Args::<T>::from_arg_matches_mut(&mut args)?;
+        // let args
         let config = if let Ok(f) = File::open(&args.config_path) {
-            match serde_yaml::from_reader::<_, <T as ClapSerde>::Opt>(BufReader::new(f)) {
-                Ok(config) => T::from(config).merge(&mut args.config),
-                Err(err) => {
-                    return Err(ConfigParseError::ConfigParsingError(
-                        args.config_path.into_os_string(),
-                        err.to_string(),
-                    ));
-                }
-            }
+            let c = serde_yaml::from_reader::<_, <T as ClapSerde>::Opt>(BufReader::new(f))?;
+            T::from(c).merge(&mut args.config)
         } else {
             T::from(&mut args.config)
         };

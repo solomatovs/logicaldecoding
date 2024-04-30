@@ -1,5 +1,6 @@
 pub mod arg;
 pub mod err;
+pub mod file_search;
 pub mod help;
 
 pub use arg::Args;
