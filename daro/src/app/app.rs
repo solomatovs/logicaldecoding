@@ -18,8 +18,12 @@ use dymod::dymod;
 dymod! {
      pub mod subcrate {
         pub struct MainPlugin {
-            fn init();
-            fn deinit();
+            fn init(self);
+            fn deinit(&self);
+            fn deinit2(&mut self);
+            fn deinit3(self, a: u8);
+            fn deinit4(&self, a: u8);
+            fn deinit5(&mut self, a: u8);
         }
      }
 }

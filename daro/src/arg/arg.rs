@@ -1,8 +1,8 @@
 use std::{fs::File, io::BufReader, path::PathBuf};
 
 use anyhow::Result;
-use log::info;
 
+use clap::ArgMatches;
 use clap::{CommandFactory, FromArgMatches};
 use clap_serde_derive::{
     clap::{self, Parser},
@@ -35,6 +35,13 @@ impl<T> Args<T>
 where
     T: ClapSerde,
 {
+    // pub fn get_matches() -> clap::error::Error<ArgMatches> {
+    //     let command = Args::<T>::command()
+    //         .ignore_errors(true)
+    //     ;
+
+    //     command.try_get_matches()
+    // }
     pub fn conf_merge_args() -> Result<T> {
         // let mut args = Args::<T>::parse();
         let command = Args::<T>::command()

@@ -1,3 +1,6 @@
+#![feature(macro_metavar_expr)]
+#![feature(trace_macros)]
+
 pub mod dymod;
 pub mod dymod_error;
 pub mod lock;
