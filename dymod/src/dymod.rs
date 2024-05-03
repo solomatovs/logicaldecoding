@@ -3,121 +3,137 @@ macro_rules! as_item( ($i:item) => ($i) );
 
 macro_rules! foo(
     (
-        pub struct $name:ident $body:tt
+        $(#[$attr:meta])*
+        $vis:vis $(<$($lifetime:lifetime),+>)*
+        struct $name:ident $body:tt
     ) => (
-        foo!(parse [pub struct $name] [impl $name] [] [] [] $body);
+        foo!(parse [$(#[$attr])* $vis $(<$($lifetime),+>)* struct $name] [impl $name] [] [] [] $body);
     );
     
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {}
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {}
     ) => (
         foo!(output $decl $impl
             [$($member)*]
             [$($fn)*]
-            [$($fn_field)*]
+            [$($fn_member)*]
         );
     );
 
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {
+            $(#[$attr:meta])*
+            $vis:vis $(<$($lifetime:lifetime),+>)*
             fn $name:ident(&mut self $(,)? $($item:ident:$ty:ty),*) $(-> $ret:ty)?, $($t:tt)*
         }
     ) => (
         foo!(parse $decl $impl 
             [$($member)*]
             [$($fn)*]
-            [$($fn_field)*]
+            [$($fn_member)*]
             {
-                [fn $name], [self], [&mut Self,], [&mut self], [self,], [$($item:$ty),*], [$(-> $ret)?], $($t)*
+                [$(#[$attr])* $vis $(<$($lifetime),+>)*],
+                [fn $name], 
+                [self], [&mut Self,], [&mut self,], [self,], 
+                [$($item:$ty),*], [$(-> $ret)?], $($t)*
             }
 
         );
     );
 
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {
+            $(#[$attr:meta])*
+            $vis:vis $(<$($lifetime:lifetime),+>)*
             fn $name:ident(&self $(,$item:ident:$ty:ty)*) $(-> $ret:ty)?, $($t:tt)*
         }
     ) => (
         foo!( parse $decl $impl 
             [$($member)*]
             [$($fn)*]
-            [$($fn_field)*]
+            [$($fn_member)*]
             {
-                [fn $name], [self], [&Self,], [&self], [self,], [$($item:$ty),*], [$(-> $ret)?], $($t)*
+                [$(#[$attr])* $vis $(<$($lifetime),+>)*],
+                [fn $name],
+                [self], [&Self,], [&self,], [self,],
+                [$($item:$ty),*], [$(-> $ret)?], $($t)*
             }
 
         );
     );
 
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {
+            $(#[$attr:meta])*
+            $vis:vis $(<$($lifetime:lifetime),+>)*
             fn $name:ident(self $(,$item:ident:$ty:ty)*) $(-> $ret:ty)?, $($t:tt)*
         }
     ) => (
         foo!( parse $decl $impl 
             [$($member)*]
             [$($fn)*]
-            [$($fn_field)*]
+            [$($fn_member)*]
             {
-                [fn $name], [self], [Self,], [self], [self,], [$($item:$ty),*], [$(-> $ret)?], $($t)*
+                [$(#[$attr])* $vis $(<$($lifetime),+>)*],
+                [fn $name],
+                [self], [Self,], [self,], [self,],
+                [$($item:$ty),*], [$(-> $ret)?], $($t)*
             }
 
         );
     );
     
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {
+            $(#[$attr:meta])*
+            $vis:vis $(<$($lifetime:lifetime),+>)*
             fn $name:ident($($item:ident:$ty:ty)*) $(-> $ret:ty)?, $($t:tt)*
         }
     ) => (
         foo!( parse $decl $impl 
             [$($member)*]
             [$($fn)*]
-            [$($fn_field)*]
+            [$($fn_member)*]
             {
-                [fn $name], [self], [], [&self], [], [$($item:$ty),*], [$(-> $ret)?], $($t)*
+                [$(#[$attr])* $vis $(<$($lifetime),+>)*],
+                [fn $name],
+                [self], [], [&self,], [],
+                [$($item:$ty),*], [$(-> $ret)?], $($t)*
             }
 
         );
     );
     
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {
-            [fn $name:ident], [$self:tt], [$($member_self:tt)*], [$($fn_decl_self:tt)*], [$($fn_call_self:tt)*], [$($item:ident : $ty:ty),*], [$(-> $ret:ty)?], $($t:tt)*
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {
+            [$fnattr:tt], [fn $name:ident], [$self:tt], [$($member_self:tt)*], [$($fn_decl_self:tt)*], [$($fn_call_self:tt)*], [$($item:ident : $ty:ty),*], [$(-> $ret:ty)?], $($t:tt)*
         }
     ) => (
         foo!(parse $decl $impl
             [$($member)* $name: fn($($member_self)* $($ty),*) $(-> $ret)?,]
-            [$($fn)* fn $name($($fn_decl_self)*, $($item:$ty),*) $(-> $ret)? {
+            [$($fn)* $fnattr fn $name($($fn_decl_self)* $($item:$ty),*) $(-> $ret)? {
                 ($self.$name)($($fn_call_self)* $($item),*)
             }]
-            [
-                $($fn_field)*,
-            ]
-            {
-                $($t)*
-            }
+            [ $($fn_member)*, ]
+            { $($t)* }
         );
     );
     
     (
-        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*] {
+        parse $decl:tt $impl:tt [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*] {
             $name:ident: $typ:ty, $($t:tt)*
         }
     ) => (
         foo!(parse $decl $impl 
             [$($member)* $name: $typ,]
             [$($fn)*]
-            [$($fn_field)*]
-            {
-                $($t)*
-            }
+            [$($fn_member)*]
+            { $($t)* }
         );
     );
 
     (
-        output [$($decls:tt)*] [$($impl:tt)*] [$($member:tt)*] [$($fn:tt)*] [$($fn_field:tt)*]
+        output [$($decls:tt)*] [$($impl:tt)*] [$($member:tt)*] [$($fn:tt)*] [$($fn_member:tt)*]
     )
     => (
         as_item!(
