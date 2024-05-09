@@ -13,19 +13,14 @@ use signal_hook::low_level;
 use crate::app::{AppConfig, NextType};
 use crate::arg::Args;
 
-use dymod::dymod;
+use jude::jude;
 
-dymod! {
-     pub mod subcrate {
-        pub struct MainPlugin {
-            fn init(self);
-            fn deinit(&self);
-            fn deinit2(&mut self);
-            fn deinit3(self, a: u8);
-            fn deinit4(&self, a: u8);
-            fn deinit5(&mut self, a: u8);
-        }
-     }
+jude! {
+    #[derive(Debug, Clone)]
+    pub struct MainPlugin {
+        fn init(&self),
+        fn deinit(&self),
+    }
 }
 
 pub struct App {
@@ -33,7 +28,7 @@ pub struct App {
     has_terminal: bool,
     config: AppConfig,
     signals: SignalsInfo<WithOrigin>,
-    plugins: Vec<subcrate::MainPlugin>,
+    plugins: Vec<MainPlugin>,
     cache: String,
 }
 
@@ -100,7 +95,7 @@ impl App {
             self.plugins.pop();
         }
 
-        for p in self.plugins.iter() {
+        for p in &self.plugins {
             p.init();
             p.deinit();
         }
@@ -203,7 +198,7 @@ impl App {
                             info!("loading plugin: {}", p);
                         }
 
-                        match subcrate::MainPlugin::new(lib_path) {
+                        match MainPlugin::_load_from(lib_path) {
                             Ok(lib) => {
                                 debug!("{:#?}", lib);
                                 info!("loading plugin success");
@@ -229,10 +224,9 @@ impl App {
     }
 
     pub fn wait(&mut self) {
-        if let NextType::Sleep = self.config.main_next_type {
-            self.wait_sleep_duration();
-        } else {
-            self.wait_press_enter();
+        match self.config.main_next_type {
+            NextType::Sleep => self.wait_sleep_duration(),
+            NextType::Enter => self.wait_press_enter(),
         }
     }
 
